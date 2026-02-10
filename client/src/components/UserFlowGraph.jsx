@@ -8,7 +8,9 @@ import ReactFlow, {
     Background,
     useReactFlow,
     ReactFlowProvider,
-    getRectOfNodes
+    getRectOfNodes,
+    getBezierPath,
+    Position
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import dagre from 'dagre';
@@ -43,12 +45,35 @@ const getLayoutedElements = (nodes, edges) => {
     return { nodes, edges };
 };
 
-const UserFlowGraph = ({ pages, links }) => {
+const UserFlowGraph = ({ pages, links, activePersona }) => {
     // State for layout direction: 'TB' (Top-Bottom) or 'LR' (Left-Right)
     const [direction, setDirection] = React.useState('TB');
 
     const { nodes: layoutedNodes, edges: layoutedEdges } = useMemo(() => {
-        const initialNodes = pages.map((page) => {
+
+        let filteredPages = pages;
+        let filteredLinks = links;
+
+        // FILTERING LOGIC: If a persona is active, filter pages and links
+        if (activePersona && activePersona.pages) {
+            // Normalize persona pages for matching (loose matching)
+            const personaPageSet = new Set(activePersona.pages.map(p => {
+                try { return new URL(p, 'http://dummy.com').pathname; } catch (e) { return p; }
+            }));
+
+            filteredPages = pages.filter(p => {
+                try {
+                    const u = new URL(p.url).pathname;
+                    // Check if exact match or if persona listing logic included full url
+                    return personaPageSet.has(u) || activePersona.pages.includes(p.url);
+                } catch (e) { return false; }
+            });
+
+            const validNodeIds = new Set(filteredPages.map(p => p.url));
+            filteredLinks = links.filter(l => validNodeIds.has(l.source) && validNodeIds.has(l.target));
+        }
+
+        const initialNodes = filteredPages.map((page) => {
             let label = '/';
             try {
                 const u = new URL(page.url);
@@ -70,13 +95,13 @@ const UserFlowGraph = ({ pages, links }) => {
         });
 
         const inwardDegree = {};
-        links.forEach(l => { inwardDegree[l.target] = (inwardDegree[l.target] || 0) + 1; });
+        filteredLinks.forEach(l => { inwardDegree[l.target] = (inwardDegree[l.target] || 0) + 1; });
         const HUB_THRESHOLD = 4;
         const visitedHubs = new Set();
-        const validNodeIds = new Set(pages.map(p => p.url));
+        const validNodeIds = new Set(filteredPages.map(p => p.url));
         const initialEdges = [];
 
-        links.forEach((link, i) => {
+        filteredLinks.forEach((link, i) => {
             if (!validNodeIds.has(link.source) || !validNodeIds.has(link.target)) return;
             if (link.source === link.target) return;
             const isHub = inwardDegree[link.target] >= HUB_THRESHOLD;
@@ -115,12 +140,12 @@ const UserFlowGraph = ({ pages, links }) => {
         });
 
         return { nodes: initialNodes, edges: initialEdges };
-    }, [pages, links, direction]);
+    }, [pages, links, direction, activePersona]);
 
     const [nodes, setNodes, onNodesChange] = useNodesState(layoutedNodes);
     const [edges, setEdges, onEdgesChange] = useEdgesState(layoutedEdges);
 
-    const { getNodes, fitView } = useReactFlow();
+    const { getNodes, getEdges, fitView } = useReactFlow();
 
     // Re-fit view when layout changes
     React.useEffect(() => {
@@ -218,33 +243,93 @@ const UserFlowGraph = ({ pages, links }) => {
         document.head.removeChild(style);
     };
 
-    const downloadSvg = () => {
+    const exportToFigma = () => {
         const nodes = getNodes();
+        const edges = getEdges();
+
+        if (nodes.length === 0) return;
+
         const nodesBounds = getRectOfNodes(nodes);
-        const transform = [
-            -nodesBounds.x + 50,
-            -nodesBounds.y + 50,
-            1,
-        ];
+        const padding = 50;
+        const width = nodesBounds.width + padding * 2;
+        const height = nodesBounds.height + padding * 2;
+        const xOffset = -nodesBounds.x + padding;
+        const yOffset = -nodesBounds.y + padding;
 
-        const flowElement = document.querySelector('.react-flow');
-        if (!flowElement) return;
+        let svgContent = `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
+    <style>
+        text { font-family: sans-serif; font-size: 12px; }
+    </style>`;
 
-        toSvg(flowElement, {
-            backgroundColor: '#f8fafc',
-            width: nodesBounds.width + 100,
-            height: nodesBounds.height + 100,
-            style: {
-                width: `${nodesBounds.width + 100}px`,
-                height: `${nodesBounds.height + 100}px`,
-                transform: `translate(${transform[0]}px, ${transform[1]}px) scale(${transform[2]})`,
-            },
-        }).then((dataUrl) => {
-            const a = document.createElement('a');
-            a.href = dataUrl;
-            a.download = 'user-flow.svg';
-            a.click();
+        // Draw Edges
+        edges.forEach(edge => {
+            const source = nodes.find(n => n.id === edge.source);
+            const target = nodes.find(n => n.id === edge.target);
+
+            if (source && target) {
+                const srcX = source.position.x + xOffset;
+                const srcY = source.position.y + yOffset;
+                const tgtX = target.position.x + xOffset;
+                const tgtY = target.position.y + yOffset;
+
+                // Assuming standard dimensions 150x50 as per layout
+                const nodeW = 150;
+                const nodeH = 50;
+
+                const sourcePos = direction === 'TB' ? Position.Bottom : Position.Right;
+                const targetPos = direction === 'TB' ? Position.Top : Position.Left;
+
+                const sourceX = direction === 'TB' ? srcX + nodeW / 2 : srcX + nodeW;
+                const sourceY = direction === 'TB' ? srcY + nodeH : srcY + nodeH / 2;
+                const targetX = direction === 'TB' ? tgtX + nodeW / 2 : tgtX;
+                const targetY = direction === 'TB' ? tgtY : tgtY + nodeH / 2;
+
+                const [pathString] = getBezierPath({
+                    sourceX,
+                    sourceY,
+                    sourcePosition: sourcePos,
+                    targetX,
+                    targetY,
+                    targetPosition: targetPos,
+                });
+
+                const stroke = edge.style?.stroke || '#b1b1b7';
+                const strokeWidth = edge.style?.strokeWidth || 1;
+
+                svgContent += `<path d="${pathString}" stroke="${stroke}" stroke-width="${strokeWidth}" fill="none" />`;
+            }
         });
+
+        // Draw Nodes
+        nodes.forEach(node => {
+            const x = node.position.x + xOffset;
+            const y = node.position.y + yOffset;
+            const w = 150;
+            const h = 50;
+
+            // Determine styles
+            const isDoc = node.style && node.style.background === '#e0f2fe'; // Simple heuristic based on current logic
+            const fill = isDoc ? '#e0f2fe' : '#ffffff';
+            const stroke = isDoc ? '#7dd3fc' : '#94a3b8'; // approximated from border: 1px solid col
+            const textColor = isDoc ? '#0369a1' : '#1e293b'; // approximated default
+
+            svgContent += `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="4" fill="${fill}" stroke="${stroke}" stroke-width="1" />`;
+
+            // Label
+            // Escape XML entities ?? Simple helper might be needed if labels have special chars.
+            const safeLabel = (node.data.label || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            svgContent += `<text x="${x + w / 2}" y="${y + h / 2}" fill="${textColor}" text-anchor="middle" dominant-baseline="middle">${safeLabel}</text>`;
+        });
+
+        svgContent += '</svg>';
+
+        const blob = new Blob([svgContent], { type: 'image/svg+xml;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'user-flow-figma.svg';
+        a.click();
+        URL.revokeObjectURL(url);
     };
 
     return (
@@ -259,7 +344,7 @@ const UserFlowGraph = ({ pages, links }) => {
                 <button onClick={printPdf} className="btn" style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem', background: '#fff', border: '1px solid #ddd' }}>
                     Export PDF (Vector)
                 </button>
-                <button onClick={downloadSvg} className="btn" style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem', background: '#fff', border: '1px solid #ddd' }}>
+                <button onClick={exportToFigma} className="btn" style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem', background: '#fff', border: '1px solid #ddd' }}>
                     Export for Figma
                 </button>
             </div>

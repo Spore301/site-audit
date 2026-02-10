@@ -92,21 +92,48 @@ Build a site audit platform that provides a sitemap, user flow diagram, and brok
 - Use `html-to-image` (`toSvg`) for **Figma Export**. This creates a vector SVG file that can be dragged directly into Figma.
 - [Modify] `client/src/components/UserFlowGraph.jsx`: Add "Export for Figma" button.
 
-#### [NEW] client/src/pages/Loader.jsx
-- Visual progress bar.
-- Polls backend or listens to SSE for specific project ID.
+# User Persona Implementation Plan
 
-#### [NEW] client/src/pages/Dashboard.jsx
-- Layout with Sidebar and Main Content Area.
+## Goal
+Transform the "User Flow" graph from a noisy all-encompassing sitemap into targeted, actionable user journeys based on specific personas (e.g., "Job Seeker", "Investor", "Customer").
 
-#### [NEW] client/src/components/SitemapView.jsx
-- Tree or List view of `pages`.
+## Architecture
+We will use a local **Ollama** model (e.g., `llama3`, `mistral`) to analyze the crawled sitemap and deduce likely personas and their relevant paths. We will continue using **React Flow** for the visualization.
 
-#### [NEW] client/src/components/UserFlowView.jsx
-- Use a graph library (e.g., `reactflow` or `vis-network`) to render the `pages` nodes and `links` edges.
+### 1. Backend (`/server`)
+- **No External Dependency**: Use native `fetch` to call local Ollama API.
+- **Database**: Add `personas` column (JSON) to `Project` model.
+- **New Endpoint**: `POST /api/projects/:id/analyze-personas`
+  - **Input**: Project ID.
+  - **Process**:
+    1.  Fetch all scanned pages (`url`, `title`).
+    2.  **Call Ollama**: POST to `http://localhost:11434/api/generate`.
+    3.  **Prompt**: "Analyze these URLs and return a JSON list of 3-5 key user personas (e.g., Investor, Customer) with their relevant page paths."
+    4.  **Parsing**: robustly parse likely non-perfect JSON from small models.
+    5.  Save results to DB and return.
 
-#### [NEW] client/src/components/BrokenLinksView.jsx
-- Table/List of broken links with source page reference.
+### 2. Frontend (`/client`)
+- **Dashboard UI**:
+    - Add "Generate Personas (Ollama)" button.
+    - Add **Persona Selector** dropdown.
+- **Graph Logic (`UserFlowGraph.jsx`)**:
+    - **Library**: Continue using **React Flow**.
+    - **Filtering**:
+        - Receive `activePersona` prop.
+        - If active, filter `nodes` array to only show pages in the persona's list.
+        - Filter `edges` to ensure connectivity is maintained or just show direct links between visible nodes.
+        - **Layout**: Re-run Dagre layout on the filtered subset so the graph looks clean (not just a sparse version of the big graph).
+
+## Proposed Workflow
+1.  User clicks **"Generate Personas"** in Dashboard.
+2.  Backend sends Sitemap -> Ollama (Local).
+3.  Ollama returns JSON (e.g., `[{ name: "Investor", pages: [...] }]`).
+4.  User selects "Investor" from dropdown.
+5.  Graph re-renders showing only investor-relevant pages and flows.
+
+## Requirements
+- **Ollama** running locally on port 11434.
+- Model pulled (e.g., `ollama pull llama3`).
 
 ## Verification Plan
 ### Automated Tests

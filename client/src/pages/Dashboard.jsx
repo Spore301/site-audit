@@ -2,18 +2,42 @@ import { useParams, Link } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { ChevronLeft, Layout, GitGraph, AlertCircle } from 'lucide-react';
 import UserFlowGraph from '../components/UserFlowGraph';
+import PageFlowGraph from '../components/PageFlowGraph';
 import API_BASE_URL from '../config';
 
 const Dashboard = () => {
     const { id } = useParams();
     const [project, setProject] = useState(null);
-    const [view, setView] = useState('sitemap'); // sitemap, flow, broken
+    const [view, setView] = useState('sitemap');
+    const [personas, setPersonas] = useState([]);
+    const [analyzing, setAnalyzing] = useState(false);
+    const [activePersona, setActivePersona] = useState(null);
 
     useEffect(() => {
         fetch(`${API_BASE_URL}/api/projects/${id}`)
             .then(res => res.json())
-            .then(data => setProject(data));
+            .then(data => {
+                setProject(data);
+                if (data.personas && data.personas.length > 0) {
+                    setPersonas(data.personas);
+                }
+            });
     }, [id]);
+
+    const analyzePersonas = () => {
+        setAnalyzing(true);
+        fetch(`${API_BASE_URL}/api/projects/${id}/analyze-personas`, { method: 'POST' })
+            .then(res => res.json())
+            .then(data => {
+                setPersonas(data);
+                setAnalyzing(false);
+            })
+            .catch(err => {
+                console.error(err);
+                setAnalyzing(false);
+                alert('Failed to analyze personas. Make sure Ollama is running.');
+            });
+    };
 
     const downloadCSV = (data, filename) => {
         const blob = new Blob([data], { type: 'text/csv' });
@@ -44,6 +68,9 @@ const Dashboard = () => {
                     <button onClick={() => setView('flow')} className={`btn`} style={{ justifyContent: 'flex-start', background: view === 'flow' ? '#e2e8f0' : 'transparent', color: view === 'flow' ? 'black' : '#666' }}>
                         <GitGraph size={18} style={{ marginRight: '0.5rem' }} /> User Flow
                     </button>
+                    <button onClick={() => setView('pageflow')} className={`btn`} style={{ justifyContent: 'flex-start', background: view === 'pageflow' ? '#e2e8f0' : 'transparent', color: view === 'pageflow' ? 'black' : '#666' }}>
+                        <GitGraph size={18} style={{ marginRight: '0.5rem' }} /> Page Flow
+                    </button>
                     <button onClick={() => setView('broken')} className={`btn`} style={{ justifyContent: 'flex-start', background: view === 'broken' ? '#e2e8f0' : 'transparent', color: view === 'broken' ? 'black' : '#666' }}>
                         <AlertCircle size={18} style={{ marginRight: '0.5rem' }} /> Broken Links
                     </button>
@@ -62,6 +89,9 @@ const Dashboard = () => {
                                 const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
                                 downloadCSV(csvContent, 'sitemap.csv');
                             }} className="btn" style={{ fontSize: '0.9rem' }}>Export CSV</button>
+                            <button onClick={() => {
+                                window.open(`${API_BASE_URL}/api/projects/${id}/download-documents`, '_blank');
+                            }} className="btn" style={{ fontSize: '0.9rem', marginLeft: '0.5rem' }}>Download Documents (ZIP)</button>
                         </div>
                         <div className="card">
                             {(() => {
@@ -111,9 +141,41 @@ const Dashboard = () => {
                 )}
                 {view === 'flow' && (
                     <div>
-                        <h2 className="page-title" style={{ fontSize: '1.8rem' }}>User Flow</h2>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                            <h2 className="page-title" style={{ fontSize: '1.8rem', marginBottom: 0 }}>User Flow</h2>
+                            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                                {personas.length > 0 && (
+                                    <select
+                                        onChange={(e) => setActivePersona(personas.find(p => p.name === e.target.value) || null)}
+                                        style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #ddd' }}
+                                    >
+                                        <option value="">All Personas</option>
+                                        {personas.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
+                                    </select>
+                                )}
+                                <button onClick={analyzePersonas} disabled={analyzing} className="btn" style={{ fontSize: '0.9rem' }}>
+                                    {analyzing ? 'Analyzing with AI...' : 'Analyze Personas'}
+                                </button>
+                            </div>
+                        </div>
+                        {activePersona && (
+                            <div style={{ marginBottom: '1rem', padding: '1rem', background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: '8px' }}>
+                                <strong>{activePersona.name}:</strong> {activePersona.description}
+                            </div>
+                        )}
                         <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-                            <UserFlowGraph pages={project.pages} links={project.links} />
+                            <UserFlowGraph pages={project.pages} links={project.links} activePersona={activePersona || null} />
+                        </div>
+                    </div>
+                )}
+                {view === 'pageflow' && (
+                    <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                            <h2 className="page-title" style={{ fontSize: '1.8rem', marginBottom: 0 }}>Page Flow Details</h2>
+                            {/* Reusing Persona Logic if needed, or keeping it separate */}
+                        </div>
+                        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                            <PageFlowGraph pages={project.pages} links={project.links} activePersona={activePersona || null} />
                         </div>
                     </div>
                 )}

@@ -6,6 +6,7 @@ const Loader = () => {
     const { id } = useParams();
     const navigate = useNavigate();
     const [status, setStatus] = useState('initializing');
+    const [count, setCount] = useState(0);
 
     useEffect(() => {
         const interval = setInterval(() => {
@@ -13,6 +14,7 @@ const Loader = () => {
                 .then(res => res.json())
                 .then(data => {
                     setStatus(data.status);
+                    if (data.pages) setCount(data.pages.length);
                     if (data.status === 'completed') {
                         navigate(`/project/${id}/dashboard`);
                     }
@@ -27,7 +29,8 @@ const Loader = () => {
         <div className="loader-container">
             <div className="spinner"></div>
             <h2 style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>Scanning Website...</h2>
-            <p style={{ color: '#666' }}>Status: {status}</p>
+            <p style={{ color: '#666', fontSize: '1.1rem', fontWeight: 500 }}>{count} pages scanned</p>
+            <p style={{ color: '#999', fontSize: '0.9rem' }}>Status: {status}</p>
         </div>
     );
 };

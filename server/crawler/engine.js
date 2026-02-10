@@ -99,19 +99,55 @@ const startScan = async (projectId, startUrl) => {
                 console.log(`[Crawl] Extracting links from ${currentUrl}...`);
                 const hrefs = await page.evaluate(() => {
                     return Array.from(document.querySelectorAll('a[href]'))
+                        // Filter out Language/Country Selectors
+                        .filter(a => {
+                            // Check for common container names for language pickers
+                            const interactable = a.closest('[class*="language" i], [id*="language" i], [class*="country" i], [id*="country" i], [class*="locale" i], [id*="locale" i], [data-testid*="language" i]');
+                            if (interactable) return false;
+
+                            // Check link text for obvious language names if list is huge? (Optional, stick to container for now)
+                            return true;
+                        })
                         .map(a => {
                             try {
-                                return new URL(a.href, document.baseURI).href;
+                                const href = new URL(a.href, document.baseURI).href;
+
+                                // Text Extraction Priority
+                                let text = a.innerText.trim();
+                                if (!text) text = a.textContent.trim(); // Fallback to raw text
+                                if (!text) text = a.getAttribute('aria-label') || '';
+                                if (!text) {
+                                    const img = a.querySelector('img');
+                                    if (img) text = img.getAttribute('alt') || '';
+                                }
+                                if (!text) text = a.title || '';
+
+                                // Last resort fallback: Pathname
+                                if (!text) {
+                                    try {
+                                        const path = new URL(href).pathname;
+                                        text = path === '/' ? 'Home' : path.split('/').filter(Boolean).pop() || 'Link';
+                                    } catch (e) { text = 'Link'; }
+                                }
+
+                                let context = 'content';
+                                if (a.closest('nav') || a.closest('header')) context = 'nav';
+                                else if (a.closest('footer')) context = 'footer';
+
+                                return { href, text: text.slice(0, 30), context };
                             } catch (e) { return null; }
                         })
-                        .filter(href => href);
+                        .filter(item => item && item.href);
                 });
                 console.log(`[Crawl] Found ${hrefs.length} raw links on ${currentUrl}`);
 
                 let newLinksCount = 0;
 
-                for (let href of hrefs) {
-                    href = href.split('#')[0];
+                for (let linkObj of hrefs) {
+                    let href = linkObj.href.split('#')[0];
+                    const linkText = linkObj.text;
+                    const context = linkObj.context;
+
                     if (href.endsWith('/') && href.split('/').length > 3) {
                         href = href.slice(0, -1);
                     }
@@ -131,10 +167,12 @@ const startScan = async (projectId, startUrl) => {
                         const linkDomain = linkUrl.hostname.replace(/^www\./, '');
 
                         if (linkDomain === baseDomain) {
-                            const exists = links.find(l => l.source === currentUrl && l.target === href);
+                            // Check if this specific link (source + target + specific text + context) exists
+                            const exists = links.find(l => l.source === currentUrl && l.target === href && l.text === linkText && l.context === context);
+
                             if (!exists && href !== currentUrl) {
-                                console.log(`[Link] Found: ${href} ${isDocument ? '(Document)' : '(Page)'}`);
-                                links.push({ source: currentUrl, target: href });
+                                console.log(`[Link] Found: ${linkText} (${context}) -> ${href}`);
+                                links.push({ source: currentUrl, target: href, text: linkText, context });
                             }
 
                             // Only add to crawl queue if it's NOT a document and NOT already visited
@@ -162,7 +200,8 @@ const startScan = async (projectId, startUrl) => {
                 console.log(`[Crawl] Added ${newLinksCount} new unique internal links to queue.`);
 
                 // Periodic update to DB
-                if (visited.size % 5 === 0) {
+                // Update more frequently for better UX feedback
+                if (visited.size % 1 === 0) {
                     await updateProject(projectId, { pages, links, brokenLinks });
                 }
 

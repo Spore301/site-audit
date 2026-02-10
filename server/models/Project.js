@@ -34,6 +34,10 @@ const Project = sequelize.define('Project', {
     error: {
         type: DataTypes.TEXT,
         allowNull: true
+    },
+    personas: {
+        type: DataTypes.JSON,
+        defaultValue: []
     }
 }, {
     timestamps: true
