@@ -46,11 +46,11 @@ Do not include markdown formatting or explanation. JUST THE JSON.
 URLs:
 ${pageList}`;
 
-        console.log('[Test] Sending request to Ollama (llama3:latest) with num_ctx: 8192...');
+        console.log('[Test] Sending request to Ollama (kimi-k2.5:cloud) with num_ctx: 8192...');
         const startTime = Date.now();
 
         const response = await axios.post('http://localhost:11434/api/generate', {
-            model: "llama3:latest",
+            model: "kimi-k2.5:cloud",
             prompt: prompt,
             stream: false,
             format: "json",

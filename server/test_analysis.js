@@ -76,7 +76,7 @@ ${pageList}`;
 
         console.log('[Test] Sending request to Ollama...');
         const response = await axios.post('http://localhost:11434/api/generate', {
-            model: "llama3:latest",
+            model: "kimi-k2.5:cloud",
             prompt: prompt,
             stream: false,
             format: "json",

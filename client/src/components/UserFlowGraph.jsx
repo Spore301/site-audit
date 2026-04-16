@@ -45,33 +45,34 @@ const getLayoutedElements = (nodes, edges) => {
     return { nodes, edges };
 };
 
-const UserFlowGraph = ({ pages, links, activePersona }) => {
+const UserFlowGraph = ({ pages, links, userFlowUrls = [] }) => {
     // State for layout direction: 'TB' (Top-Bottom) or 'LR' (Left-Right)
     const [direction, setDirection] = React.useState('TB');
 
-    const { nodes: layoutedNodes, edges: layoutedEdges } = useMemo(() => {
+    const { nodes: layoutedNodes, edges: layoutedEdges, flowPathEdges } = useMemo(() => {
 
         let filteredPages = pages;
         let filteredLinks = links;
+        let flowPathSet = new Set();
 
-        // FILTERING LOGIC: If a persona is active, filter pages and links
-        if (activePersona && activePersona.pages) {
-            // Normalize persona pages for matching (loose matching)
-            const personaPageSet = new Set(activePersona.pages.map(p => {
-                try { return new URL(p, 'http://dummy.com').pathname; } catch (e) { return p; }
-            }));
+        // FILTERING LOGIC: If a persona is active with userFlowUrls, focus on that flow
+        if (userFlowUrls && userFlowUrls.length > 0) {
+            // Create a set of URLs in the flow for quick lookup
+            const flowUrlSet = new Set(userFlowUrls);
 
-            filteredPages = pages.filter(p => {
-                try {
-                    const u = new URL(p.url).pathname;
-                    // Check if exact match or if persona listing logic included full url
-                    return personaPageSet.has(u) || activePersona.pages.includes(p.url);
-                } catch (e) { return false; }
-            });
+            // Filter to show all pages but highlight the flow
+            filteredPages = pages;
+            filteredLinks = links;
 
-            const validNodeIds = new Set(filteredPages.map(p => p.url));
-            filteredLinks = links.filter(l => validNodeIds.has(l.source) && validNodeIds.has(l.target));
+            // Create ordered pairs for the flow path
+            for (let i = 0; i < userFlowUrls.length - 1; i++) {
+                flowPathSet.add(`${userFlowUrls[i]}-${userFlowUrls[i+1]}`);
+            }
         }
+
+        // Determine which pages are in the flow
+        const flowUrlSet = new Set(userFlowUrls);
+        const isInFlow = (url) => flowUrlSet.has(url);
 
         const initialNodes = filteredPages.map((page) => {
             let label = '/';
@@ -81,16 +82,24 @@ const UserFlowGraph = ({ pages, links, activePersona }) => {
                 if (label.length > 20) label = label.slice(0, 8) + '...' + label.slice(-8);
             } catch (e) { }
             const isDoc = page.type === 'document';
+            const inFlow = isInFlow(page.url);
+
             return {
                 id: page.url,
                 data: { label },
                 position: { x: 0, y: 0 },
                 style: isDoc ? {
-                    background: '#e0f2fe',
+                    background: inFlow ? '#dbeafe' : '#e0f2fe',
                     color: '#0369a1',
-                    border: '1px solid #7dd3fc',
-                    width: 150
-                } : { width: 150 }
+                    border: inFlow ? '2px solid #1e7ddf' : '1px solid #7dd3fc',
+                    width: 150,
+                    opacity: userFlowUrls.length > 0 ? (inFlow ? 1 : 0.3) : 1
+                } : {
+                    background: inFlow ? '#dbeafe' : '#ffffff',
+                    border: inFlow ? '2px solid #1e7ddf' : '1px solid #94a3b8',
+                    width: 150,
+                    opacity: userFlowUrls.length > 0 ? (inFlow ? 1 : 0.3) : 1
+                }
             };
         });
 
@@ -101,17 +110,45 @@ const UserFlowGraph = ({ pages, links, activePersona }) => {
         const validNodeIds = new Set(filteredPages.map(p => p.url));
         const initialEdges = [];
 
+        // Create a set of flow path connections (source-target pairs)
+        const flowConnectionSet = new Set();
+        for (let i = 0; i < userFlowUrls.length - 1; i++) {
+            flowConnectionSet.add(`${userFlowUrls[i]}-${userFlowUrls[i+1]}`);
+        }
+
         filteredLinks.forEach((link, i) => {
             if (!validNodeIds.has(link.source) || !validNodeIds.has(link.target)) return;
             if (link.source === link.target) return;
+
+            const isInFlowPath = flowConnectionSet.has(`${link.source}-${link.target}`);
             const isHub = inwardDegree[link.target] >= HUB_THRESHOLD;
+
             if (isHub) {
                 if (!visitedHubs.has(link.target)) {
                     visitedHubs.add(link.target);
-                    initialEdges.push({ id: `e${i}`, source: link.source, target: link.target, animated: true, style: { stroke: '#cbd5e1', strokeWidth: 1 } });
+                    initialEdges.push({
+                        id: `e${i}`,
+                        source: link.source,
+                        target: link.target,
+                        animated: isInFlowPath,
+                        style: {
+                            stroke: isInFlowPath ? '#1e7ddf' : '#cbd5e1',
+                            strokeWidth: isInFlowPath ? 3 : 1
+                        }
+                    });
                 }
             } else {
-                initialEdges.push({ id: `e${i}`, source: link.source, target: link.target, animated: true, style: { stroke: '#64748b', strokeWidth: 1.5 } });
+                initialEdges.push({
+                    id: `e${i}`,
+                    source: link.source,
+                    target: link.target,
+                    animated: isInFlowPath,
+                    style: {
+                        stroke: isInFlowPath ? '#1e7ddf' : '#94a3b8',
+                        strokeWidth: isInFlowPath ? 3 : 1.5,
+                        opacity: userFlowUrls.length > 0 ? (isInFlowPath ? 1 : 0.2) : 1
+                    }
+                });
             }
         });
 
@@ -140,7 +177,7 @@ const UserFlowGraph = ({ pages, links, activePersona }) => {
         });
 
         return { nodes: initialNodes, edges: initialEdges };
-    }, [pages, links, direction, activePersona]);
+    }, [pages, links, direction, userFlowUrls]);
 
     const [nodes, setNodes, onNodesChange] = useNodesState(layoutedNodes);
     const [edges, setEdges, onEdgesChange] = useEdgesState(layoutedEdges);

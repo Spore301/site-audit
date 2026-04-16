@@ -90,7 +90,51 @@ const startScan = async (projectId, startUrl) => {
                 }
 
                 const title = await page.title();
-                pages.push({ url: currentUrl, title });
+
+                // Extract additional context for AI summarization
+                const pageContext = await page.evaluate(() => {
+                    const h1 = document.querySelector('h1');
+                    const h2s = Array.from(document.querySelectorAll('h2')).slice(0, 3).map(h => h.innerText.trim());
+                    const metaDesc = document.querySelector('meta[name="description"]');
+                    const headings = Array.from(document.querySelectorAll('h1, h2, h3')).map(h => h.innerText.trim()).slice(0, 5);
+
+                    // Detect page type based on content indicators
+                    let pageType = 'content';
+                    const hasProducts = document.querySelector('[class*="product" i], [class*="item" i], [class*="shop" i]') !== null;
+                    const hasPricing = document.querySelector('[class*="price" i], [class*="pricing" i]') !== null;
+                    const hasForm = document.querySelector('form') !== null;
+                    const hasCart = document.querySelector('[class*="cart" i], [id*="cart" i]') !== null;
+
+                    if (hasCart || (hasProducts && hasPricing)) pageType = 'product';
+                    else if (hasPricing) pageType = 'pricing';
+                    else if (hasForm) pageType = 'contact';
+                    else if (document.body.innerText.toLowerCase().includes('blog') || window.location.pathname.includes('blog')) pageType = 'blog';
+
+                    // Extract CTAs
+                    const ctas = Array.from(document.querySelectorAll('a, button'))
+                        .filter(el => {
+                            const text = el.innerText.toLowerCase();
+                            return ['buy', 'shop', 'get started', 'sign up', 'learn more', 'contact', 'download', 'subscribe'].some(cta => text.includes(cta));
+                        })
+                        .map(el => el.innerText.trim())
+                        .slice(0, 3);
+
+                    return {
+                        h1: h1 ? h1.innerText.trim() : '',
+                        h2s,
+                        metaDescription: metaDesc ? metaDesc.content : '',
+                        headings,
+                        pageType,
+                        ctas,
+                        wordCount: document.body.innerText.split(/\s+/).length
+                    };
+                });
+
+                pages.push({
+                    url: currentUrl,
+                    title,
+                    ...pageContext
+                });
 
                 if (source) {
                     links.push({ source, target: currentUrl });

@@ -38,6 +38,14 @@ const Project = sequelize.define('Project', {
     personas: {
         type: DataTypes.JSON,
         defaultValue: []
+    },
+    siteSummary: {
+        type: DataTypes.JSON,
+        allowNull: true
+    },
+    userFlows: {
+        type: DataTypes.JSON,
+        allowNull: true
     }
 }, {
     timestamps: true
